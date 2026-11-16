@@ -550,10 +550,7 @@ namespace GSpaceAnalyzerSetup
             iconBox.Bounds = new Rectangle(28, 24, 46, 46);
             iconBox.SizeMode = PictureBoxSizeMode.Zoom;
             iconBox.BackColor = Color.Transparent;
-            if (formIcon != null)
-            {
-                iconBox.Image = formIcon.ToBitmap();
-            }
+            iconBox.Image = LoadIconImage();
             Controls.Add(iconBox);
 
             Label titleLabel = new Label();
@@ -735,6 +732,109 @@ namespace GSpaceAnalyzerSetup
                 // Fall back to the default window icon.
             }
             return null;
+        }
+
+        // GDI+'s Icon.ToBitmap() garbles icon frames that are stored as PNG
+        // (all but the smallest sizes in our .ico), so pull the frame out of the
+        // resource ourselves and let the PNG decoder handle it. The shell-drawn
+        // window icon is unaffected because that path uses the icon handle.
+        private static Image LoadIconImage()
+        {
+            try
+            {
+                using (Stream stream = Assembly.GetExecutingAssembly()
+                           .GetManifestResourceStream("AppIcon"))
+                {
+                    if (stream != null)
+                    {
+                        using (MemoryStream buffer = new MemoryStream())
+                        {
+                            stream.CopyTo(buffer);
+                            Image image = DecodeBestFrame(buffer.ToArray(), 128);
+                            if (image != null)
+                            {
+                                return image;
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                // Fall back to the shell icon below.
+            }
+
+            try
+            {
+                Icon shellIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+                if (shellIcon != null)
+                {
+                    using (shellIcon)
+                    {
+                        return shellIcon.ToBitmap();
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                // No icon at all then; the header simply has no picture.
+            }
+            return null;
+        }
+
+        // Picks the largest PNG-compressed frame up to maxSize and decodes it.
+        private static Image DecodeBestFrame(byte[] data, int maxSize)
+        {
+            if (data.Length < 22)
+            {
+                return null;
+            }
+
+            int count = BitConverter.ToUInt16(data, 4);
+            int bestOffset = -1;
+            int bestBytes = 0;
+            int bestWidth = -1;
+            for (int i = 0; i < count; i++)
+            {
+                int entry = 6 + i * 16;
+                if (entry + 16 > data.Length)
+                {
+                    break;
+                }
+
+                int width = data[entry] == 0 ? 256 : data[entry];
+                int bytes = BitConverter.ToInt32(data, entry + 8);
+                int offset = BitConverter.ToInt32(data, entry + 12);
+                if (width > maxSize || bytes <= 0 || offset <= 0 || offset + bytes > data.Length)
+                {
+                    continue;
+                }
+
+                // 0x89 is the first byte of the PNG signature.
+                if (data[offset] != 0x89)
+                {
+                    continue;
+                }
+
+                if (width > bestWidth)
+                {
+                    bestWidth = width;
+                    bestOffset = offset;
+                    bestBytes = bytes;
+                }
+            }
+
+            if (bestOffset < 0)
+            {
+                return null;
+            }
+
+            using (MemoryStream png = new MemoryStream(data, bestOffset, bestBytes))
+            using (Image decoded = Image.FromStream(png))
+            {
+                // Copy so the bitmap does not depend on the stream staying open.
+                return new Bitmap(decoded);
+            }
         }
 
         private void OnBrowseClick(object sender, EventArgs e)
