@@ -117,6 +117,9 @@ namespace GSpaceAnalyzerSetup
                         return 0;
                     }
                     installer.Uninstall(report, directory);
+                    // No window to wait for in silent mode, so hand the folder to
+                    // the detached shell straight away.
+                    Installer.ScheduleDirectoryRemoval(directory);
                 }
                 else
                 {
@@ -252,8 +255,10 @@ namespace GSpaceAnalyzerSetup
             report("Removing application files");
             DeleteFile(Path.Combine(directory, Product.AppExe));
 
+            // The wizard still needs its own Uninstall.exe in this folder, so the
+            // folder is removed once the window has closed instead - see
+            // SetupForm.OnFormClosed.
             report("Cleaning up");
-            ScheduleDirectoryRemoval(directory);
         }
 
         /// <summary>The folder holding the running uninstaller, else the registered location.</summary>
@@ -413,11 +418,12 @@ namespace GSpaceAnalyzerSetup
 
         // The uninstaller cannot delete the folder it is running from, so hand
         // the removal to a detached shell once this process has exited.
-        private static void ScheduleDirectoryRemoval(string directory)
+        internal static void ScheduleDirectoryRemoval(string directory)
         {
             try
             {
-                string arguments = "/c ping 127.0.0.1 -n 3 > nul & rmdir /s /q \"" + directory + "\"";
+                // Waits for this process (and the wizard window) to be gone.
+                string arguments = "/c ping 127.0.0.1 -n 4 > nul & rmdir /s /q \"" + directory + "\"";
                 ProcessStartInfo info = new ProcessStartInfo("cmd.exe", arguments);
                 info.UseShellExecute = false;
                 info.CreateNoWindow = true;
@@ -519,6 +525,7 @@ namespace GSpaceAnalyzerSetup
         private readonly Panel progressFill;
         private int progressSteps;
         private bool finished;
+        private string pendingRemoval;
 
         public int ExitCode { get; private set; }
 
@@ -971,6 +978,19 @@ namespace GSpaceAnalyzerSetup
             }
         }
 
+        // Deletes the install folder only once this window is gone: the running
+        // Uninstall.exe lives there and locks it until the process exits.
+        protected override void OnFormClosed(FormClosedEventArgs e)
+        {
+            if (!string.IsNullOrEmpty(pendingRemoval))
+            {
+                Installer.ScheduleDirectoryRemoval(pendingRemoval);
+                pendingRemoval = null;
+            }
+
+            base.OnFormClosed(e);
+        }
+
         private void OnPrimaryClick(object sender, EventArgs e)
         {
             if (finished)
@@ -1035,6 +1055,7 @@ namespace GSpaceAnalyzerSetup
                 if (uninstallMode)
                 {
                     installer.Uninstall(report, directory);
+                    pendingRemoval = directory;
                     progressFill.Width = 424;
                     headingLabel.Text = "G-SpaceAnalyzer has been removed";
                     statusLabel.Text = "The application and its shortcuts are gone. "
