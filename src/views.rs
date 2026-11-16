@@ -1491,18 +1491,29 @@ fn feature_tile(
         theme::font_icon(13.0),
         palette.accent,
     );
-    ui.painter().text(
-        Pos2::new(rect.left() + 50.0, rect.top() + 24.0),
+    // Everything after the icon wraps inside the card instead of running past its
+    // edge, and is clipped as a last resort.
+    let painter = ui
+        .painter()
+        .with_clip_rect(rect.shrink2(Vec2::new(6.0, 4.0)));
+    let text_left = rect.left() + 50.0;
+    let text_width = (rect.right() - 14.0 - text_left).max(60.0);
+    painter.text(
+        Pos2::new(text_left, rect.top() + 24.0),
         Align2::LEFT_CENTER,
         title,
         theme::font_semibold(11.0),
         palette.text,
     );
-    ui.painter().text(
-        Pos2::new(rect.left() + 50.0, rect.top() + 43.0),
-        Align2::LEFT_CENTER,
-        truncate_middle(description, 64),
+    let description_galley = painter.layout(
+        description.to_owned(),
         theme::font_regular(9.3),
+        palette.faint,
+        text_width,
+    );
+    painter.galley(
+        Pos2::new(text_left, rect.top() + 36.0),
+        description_galley,
         palette.faint,
     );
 }
