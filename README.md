@@ -1,5 +1,7 @@
 # G-SpaceAnalyzer
 
+[![Release](https://github.com/DakaGoa/G-SpaceAnalyzer/actions/workflows/release.yml/badge.svg)](https://github.com/DakaGoa/G-SpaceAnalyzer/actions/workflows/release.yml)
+
 A fast, modern, free and open source disk space analyzer for Windows, written in Rust.
 
 G-SpaceAnalyzer shows where the space on a drive actually went, then lets you do something
