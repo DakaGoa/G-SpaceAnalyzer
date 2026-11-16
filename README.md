@@ -32,9 +32,13 @@ own PC.
 
 ## Install
 
-Run `GSpaceAnalyzerSetup.exe` from a release. It installs per user into
-`%LOCALAPPDATA%\Programs\G-SpaceAnalyzer` (no administrator rights, no UAC prompt), adds a Start
-menu shortcut and registers with Add or Remove Programs.
+**[Download the latest release](https://github.com/DakaGoa/G-SpaceAnalyzer/releases/latest)** and
+run `GSpaceAnalyzerSetup.exe` — or use the direct link:
+<https://github.com/DakaGoa/G-SpaceAnalyzer/releases/latest/download/GSpaceAnalyzerSetup.exe>
+
+It installs per user into `%LOCALAPPDATA%\Programs\G-SpaceAnalyzer` (no administrator rights, no
+UAC prompt), adds a Start menu shortcut and registers with Add or Remove Programs. Upgrades install
+over the top and keep your settings and snapshots, and the same setup file can be used to uninstall.
 
 Silent install: `GSpaceAnalyzerSetup.exe /S`
 
