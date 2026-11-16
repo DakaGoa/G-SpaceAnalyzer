@@ -64,8 +64,18 @@ is needed, and the result is a single self-contained `dist\GSpaceAnalyzerSetup.e
 ### Code signing
 
 Builds are unsigned by default, which is why Windows shows a SmartScreen warning and why Defender's
-heuristics sometimes flag a fresh download. To sign the app and the installer, supply a
-code-signing certificate — `signtool` (from the Windows SDK) is found automatically:
+heuristics sometimes flag a fresh download.
+
+Releases are signed for free through [SignPath Foundation](https://signpath.org/), which signs
+open-source Windows builds with a certificate issued to the foundation: the private key stays on
+their HSM and the signing request is bound to a GitHub Actions run of this repository. The workflow
+is ready for it — it needs one repository secret and one variable, both created in the SignPath
+account set up per [CODE_SIGNING.md](CODE_SIGNING.md): `SIGNPATH_API_TOKEN` and
+`SIGNPATH_ORGANIZATION_ID`. Until they exist, releases are built and published unsigned and the log
+says so.
+
+If you have your own certificate instead, `installer/build-installer.ps1` signs with it directly —
+`signtool` (from the Windows SDK) is found automatically:
 
 ```
 $env:CODESIGN_PFX = 'C:\certs\codesign.pfx'

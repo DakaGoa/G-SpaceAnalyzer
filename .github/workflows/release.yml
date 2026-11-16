@@ -61,11 +61,22 @@ jobs:
       - name: Build the release binary
         run: cargo build --release
 
-      # Signing is optional. Add two repository secrets to enable it:
-      #   CODESIGN_PFX          base64 of the code-signing .pfx
-      #   CODESIGN_PFX_PASSWORD its password
-      # Create the base64 with:
-      #   [Convert]::ToBase64String([IO.File]::ReadAllBytes('cert.pfx'))
+      # Signing is optional and comes in two flavours.
+      #
+      # 1. SignPath Foundation (free for open source). The installer is submitted
+      #    from this workflow and comes back signed. Enable it with one repository
+      #    secret and one variable; the slug variables are optional overrides:
+      #      secret   SIGNPATH_API_TOKEN
+      #      variable SIGNPATH_ORGANIZATION_ID
+      #      variable SIGNPATH_PROJECT_SLUG                 (default g-spaceanalyzer)
+      #      variable SIGNPATH_SIGNING_POLICY_SLUG          (default release-signing)
+      #      variable SIGNPATH_ARTIFACT_CONFIGURATION_SLUG  (default release-installer)
+      #
+      # 2. Your own certificate, used when CODESIGN_PFX is set:
+      #      secret   CODESIGN_PFX          base64 of the .pfx
+      #      secret   CODESIGN_PFX_PASSWORD its password
+      #    Create the base64 with:
+      #      [Convert]::ToBase64String([IO.File]::ReadAllBytes('cert.pfx'))
       - name: Build the installer
         shell: pwsh
         env:
@@ -99,10 +110,49 @@ jobs:
             Write-Host ("Signature: {0}" -f $signature.Status)
           }
 
+      # SignPath signs the artifact it is handed, so the unsigned installer is
+      # stored first and its id is passed to the signing request.
       - name: Store the installer as an artifact
+        id: unsigned-artifact
         uses: actions/upload-artifact@v7
         with:
           name: GSpaceAnalyzerSetup-${{ steps.version.outputs.version }}
+          path: dist/GSpaceAnalyzerSetup.exe
+          if-no-files-found: error
+
+      - name: Sign the installer with SignPath Foundation
+        id: signpath
+        if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'g-spaceanalyzer' }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG || 'release-signing' }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG || 'release-installer' }}
+          github-artifact-id: ${{ steps.unsigned-artifact.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 1200
+          output-artifact-directory: signed
+
+      - name: Use the signed installer
+        if: steps.signpath.outcome == 'success'
+        shell: pwsh
+        run: |
+          $signed = Get-ChildItem -Path signed -Recurse -Filter GSpaceAnalyzerSetup.exe | Select-Object -First 1
+          if (-not $signed) { throw 'SignPath returned no signed installer.' }
+          Copy-Item $signed.FullName dist\GSpaceAnalyzerSetup.exe -Force
+
+          $signature = Get-AuthenticodeSignature dist\GSpaceAnalyzerSetup.exe
+          if (-not $signature.SignerCertificate) { throw 'The installer came back unsigned.' }
+          if ($signature.Status -eq 'HashMismatch') { throw 'The signed installer does not match its signature.' }
+          Write-Host ("Signed installer: {0} - {1}" -f $signature.Status, $signature.SignerCertificate.Subject)
+
+      - name: Store the signed installer as an artifact
+        if: steps.signpath.outcome == 'success'
+        uses: actions/upload-artifact@v7
+        with:
+          name: GSpaceAnalyzerSetup-${{ steps.version.outputs.version }}-signed
           path: dist/GSpaceAnalyzerSetup.exe
           if-no-files-found: error
 
