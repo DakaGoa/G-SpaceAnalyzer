@@ -1,0 +1,95 @@
+name: Release
+
+# Builds the app and the installer for every version tag, and attaches the
+# installer to the GitHub release for that tag. Push a tag like v1.1.0 and the
+# release appears with GSpaceAnalyzerSetup.exe on it.
+#
+# Can also be run by hand from the Actions tab: that only builds and stores the
+# installer as a workflow artifact, it never publishes a release.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build GSpaceAnalyzerSetup.exe
+    runs-on: windows-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Read the version from Cargo.toml
+        id: version
+        shell: pwsh
+        run: |
+          $match = Select-String -Path Cargo.toml -Pattern '^\s*version\s*=\s*"([^"]+)"' | Select-Object -First 1
+          if (-not $match) { throw 'Could not read the version from Cargo.toml.' }
+          $version = $match.Matches[0].Groups[1].Value
+          "version=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "Cargo.toml version: $version"
+
+      - name: Check the tag matches Cargo.toml
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          $tag = '${{ github.ref_name }}'
+          $expected = 'v${{ steps.version.outputs.version }}'
+          if ($tag -ne $expected) {
+            throw "Tag $tag does not match the Cargo.toml version (expected $expected). Bump the version before tagging."
+          }
+          Write-Host "Tag $tag matches version $expected."
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo builds
+        uses: Swatinem/rust-cache@v2
+
+      - name: Test
+        run: cargo test --release
+
+      - name: Build the release binary
+        run: cargo build --release
+
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File installer\build-installer.ps1 -SkipAppBuild
+          if (-not (Test-Path dist\GSpaceAnalyzerSetup.exe)) { throw 'The installer was not produced.' }
+          $item = Get-Item dist\GSpaceAnalyzerSetup.exe
+          Write-Host ("Installer: {0} ({1:N2} MB)" -f $item.Name, ($item.Length / 1MB))
+
+      - name: Store the installer as an artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GSpaceAnalyzerSetup-${{ steps.version.outputs.version }}
+          path: dist/GSpaceAnalyzerSetup.exe
+          if-no-files-found: error
+
+      - name: Create or update the release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = '${{ github.ref_name }}'
+          $version = '${{ steps.version.outputs.version }}'
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Release $tag exists; replacing the installer attachment."
+            gh release upload $tag dist\GSpaceAnalyzerSetup.exe --clobber
+          } else {
+            Write-Host "Creating release $tag."
+            gh release create $tag dist\GSpaceAnalyzerSetup.exe --title "G-SpaceAnalyzer $version" --generate-notes
+          }
+          if ($LASTEXITCODE -ne 0) { throw 'Publishing the release failed.' }
