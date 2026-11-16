@@ -61,13 +61,43 @@ jobs:
       - name: Build the release binary
         run: cargo build --release
 
+      # Signing is optional. Add two repository secrets to enable it:
+      #   CODESIGN_PFX          base64 of the code-signing .pfx
+      #   CODESIGN_PFX_PASSWORD its password
+      # Create the base64 with:
+      #   [Convert]::ToBase64String([IO.File]::ReadAllBytes('cert.pfx'))
       - name: Build the installer
         shell: pwsh
+        env:
+          CODESIGN_PFX_BASE64: ${{ secrets.CODESIGN_PFX }}
+          CODESIGN_PFX_PASSWORD: ${{ secrets.CODESIGN_PFX_PASSWORD }}
         run: |
-          powershell -NoProfile -ExecutionPolicy Bypass -File installer\build-installer.ps1 -SkipAppBuild
+          $pfx = Join-Path $env:RUNNER_TEMP 'codesign.pfx'
+          $signArgs = @()
+          if ($env:CODESIGN_PFX_BASE64) {
+            [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:CODESIGN_PFX_BASE64))
+            $signArgs = @('-PfxPath', $pfx, '-PfxPassword', $env:CODESIGN_PFX_PASSWORD)
+            Write-Host 'Signing certificate supplied: the app and the setup will be signed.'
+          } else {
+            Write-Host 'No CODESIGN_PFX secret: building an unsigned installer.'
+          }
+
+          try {
+            powershell -NoProfile -ExecutionPolicy Bypass -File installer\build-installer.ps1 -SkipAppBuild @signArgs
+            if ($LASTEXITCODE -ne 0) { throw 'The installer build failed.' }
+          } finally {
+            if (Test-Path $pfx) { Remove-Item $pfx -Force }
+          }
+
           if (-not (Test-Path dist\GSpaceAnalyzerSetup.exe)) { throw 'The installer was not produced.' }
-          $item = Get-Item dist\GSpaceAnalyzerSetup.exe
-          Write-Host ("Installer: {0} ({1:N2} MB)" -f $item.Name, ($item.Length / 1MB))
+          $setup = Get-Item dist\GSpaceAnalyzerSetup.exe
+          Write-Host ("Installer: {0} ({1:N2} MB)" -f $setup.Name, ($setup.Length / 1MB))
+          $signature = Get-AuthenticodeSignature $setup.FullName
+          if ($signature.SignerCertificate) {
+            Write-Host ("Signature: {0} — {1}" -f $signature.Status, $signature.SignerCertificate.Subject)
+          } else {
+            Write-Host ("Signature: {0}" -f $signature.Status)
+          }
 
       - name: Store the installer as an artifact
         uses: actions/upload-artifact@v7

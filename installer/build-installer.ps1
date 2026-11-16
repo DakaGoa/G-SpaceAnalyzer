@@ -8,11 +8,62 @@
 #   powershell -ExecutionPolicy Bypass -File installer\build-installer.ps1 -SkipAppBuild
 
 param(
-    [switch]$SkipAppBuild
+    [switch]$SkipAppBuild,
+    # Code signing is optional: supply a .pfx and the app and the setup are both
+    # signed (the app first, because the setup embeds it). Env vars are used when
+    # the parameters are omitted, which is how CI passes the certificate.
+    [string]$PfxPath = $env:CODESIGN_PFX,
+    [string]$PfxPassword = $env:CODESIGN_PFX_PASSWORD,
+    [string]$TimestampUrl = 'http://timestamp.digicert.com'
 )
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
+
+function Find-SignTool {
+    $onPath = Get-Command signtool.exe -ErrorAction SilentlyContinue
+    if ($onPath) { return $onPath.Source }
+
+    $kits = @("${env:ProgramFiles(x86)}\Windows Kits\10\bin",
+              "$env:ProgramFiles\Windows Kits\10\bin")
+    foreach ($kit in $kits) {
+        if (-not (Test-Path $kit)) { continue }
+        $found = Get-ChildItem $kit -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue |
+            Where-Object { $_.DirectoryName -match '\\x64$' } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+        if ($found) { return $found.FullName }
+    }
+    return $null
+}
+
+$signTool = $null
+if ($PfxPath) {
+    if (-not (Test-Path $PfxPath)) { throw "Signing certificate not found: $PfxPath" }
+    $signTool = Find-SignTool
+    if (-not $signTool) {
+        throw 'Cannot sign: signtool.exe was not found. Install the Windows SDK or add it to PATH.'
+    }
+    Write-Host "Signing with $PfxPath"
+}
+
+function Invoke-Sign([string]$File) {
+    if (-not $signTool) { return }
+
+    $arguments = @('sign', '/fd', 'SHA256', '/d', 'G-SpaceAnalyzer',
+                   '/du', 'https://github.com/DakaGoa/G-SpaceAnalyzer',
+                   '/f', $PfxPath)
+    if ($PfxPassword) { $arguments += @('/p', $PfxPassword) }
+    if ($TimestampUrl) { $arguments += @('/tr', $TimestampUrl, '/td', 'SHA256') }
+    $arguments += $File
+
+    & $signTool @arguments
+    if ($LASTEXITCODE -ne 0) { throw "Signing failed for $File" }
+
+    & $signTool verify /pa $File | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Signature verification failed for $File" }
+    Write-Host ("Signed {0}" -f (Split-Path -Leaf $File))
+}
 
 Push-Location $root
 try {
@@ -26,6 +77,9 @@ try {
     if (-not (Test-Path $app)) {
         throw "Missing $app - run a release build first."
     }
+
+    # The setup carries the app as a resource, so the payload is signed first.
+    Invoke-Sign $app
 
     $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
     if (-not (Test-Path $csc)) {
@@ -95,9 +149,14 @@ namespace GSpaceAnalyzerSetup
     & $csc $cscArgs
     if ($LASTEXITCODE -ne 0) { throw 'Installer compilation failed.' }
 
+    Invoke-Sign $output
+
     $item = Get-Item $output
     Write-Host ''
     Write-Host ("Built {0} ({1:N2} MB)" -f $item.FullName, ($item.Length / 1MB))
+    if (-not $signTool) {
+        Write-Host 'Unsigned: set CODESIGN_PFX (and CODESIGN_PFX_PASSWORD) to sign the build.'
+    }
 }
 finally {
     Pop-Location

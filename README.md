@@ -61,6 +61,23 @@ powershell -ExecutionPolicy Bypass -File installer\build-installer.ps1
 The installer is built with the C# compiler that ships with .NET Framework, so no extra tooling
 is needed, and the result is a single self-contained `dist\GSpaceAnalyzerSetup.exe`.
 
+### Code signing
+
+Builds are unsigned by default, which is why Windows shows a SmartScreen warning and why Defender's
+heuristics sometimes flag a fresh download. To sign the app and the installer, supply a
+code-signing certificate — `signtool` (from the Windows SDK) is found automatically:
+
+```
+$env:CODESIGN_PFX = 'C:\certs\codesign.pfx'
+$env:CODESIGN_PFX_PASSWORD = 'the-password'
+powershell -ExecutionPolicy Bypass -File installer\build-installer.ps1
+```
+
+The app executable is signed before it is embedded into the setup, then the setup is signed and
+verified. Releases built by the GitHub workflow do the same once two repository secrets exist:
+`CODESIGN_PFX` (base64 of the `.pfx`, made with
+`[Convert]::ToBase64String([IO.File]::ReadAllBytes('cert.pfx'))`) and `CODESIGN_PFX_PASSWORD`.
+
 ## Tests
 
 ```
