@@ -9,6 +9,8 @@ data that has not been touched in years, and compare two saved scans to see what
 No account, no licence key, no telemetry, no network access — everything is measured on your
 own PC.
 
+![G-SpaceAnalyzer showing a completed scan of C:\Windows](assets/screenshot.png)
+
 ## Features
 
 - **Space map** — treemap of any folder, coloured by file type, age or folder, with zoom and a
