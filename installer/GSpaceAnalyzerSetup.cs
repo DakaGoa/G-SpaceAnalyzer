@@ -18,6 +18,7 @@
 using System;
 using System.Diagnostics;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
@@ -510,10 +511,10 @@ namespace GSpaceAnalyzerSetup
         private readonly Label pathLabel;
         private readonly TextBox pathBox;
         private readonly Button browseButton;
-        private readonly CheckBox desktopCheck;
+        private readonly ToggleCheck desktopCheck;
         private readonly Button primaryButton;
         private readonly Button cancelButton;
-        private readonly CheckBox launchCheck;
+        private readonly ToggleCheck launchCheck;
         private readonly Panel progressTrack;
         private readonly Panel progressFill;
         private int progressSteps;
@@ -601,12 +602,9 @@ namespace GSpaceAnalyzerSetup
             browseButton.Click += OnBrowseClick;
             Controls.Add(browseButton);
 
-            desktopCheck = new CheckBox();
+            desktopCheck = new ToggleCheck();
             desktopCheck.Text = "Create a desktop shortcut";
-            desktopCheck.ForeColor = Product.TextColor;
-            desktopCheck.Bounds = new Rectangle(28, 160, 260, 22);
-            desktopCheck.FlatStyle = FlatStyle.Flat;
-            desktopCheck.BackColor = Color.Transparent;
+            desktopCheck.Bounds = new Rectangle(26, 158, 300, 26);
             desktopCheck.Checked = false;
             Controls.Add(desktopCheck);
 
@@ -633,12 +631,9 @@ namespace GSpaceAnalyzerSetup
             progressFill.BackColor = Product.AccentColor;
             progressTrack.Controls.Add(progressFill);
 
-            launchCheck = new CheckBox();
+            launchCheck = new ToggleCheck();
             launchCheck.Text = "Open G-SpaceAnalyzer when finished";
-            launchCheck.ForeColor = Product.TextColor;
-            launchCheck.Bounds = new Rectangle(28, 286, 234, 22);
-            launchCheck.FlatStyle = FlatStyle.Flat;
-            launchCheck.BackColor = Color.Transparent;
+            launchCheck.Bounds = new Rectangle(26, 288, 240, 26);
             launchCheck.Visible = false;
             launchCheck.Checked = true;
             Controls.Add(launchCheck);
@@ -712,6 +707,119 @@ namespace GSpaceAnalyzerSetup
             button.ForeColor = Product.MutedColor;
             button.Font = new Font("Segoe UI", 9F);
             button.Cursor = Cursors.Hand;
+        }
+
+        // The stock CheckBox draws its tick with a system colour that is
+        // invisible on the dark form (so ticking it looked like nothing
+        // happened), so both options are drawn and hit-tested here instead.
+        private sealed class ToggleCheck : Control
+        {
+            private bool isChecked;
+
+            public ToggleCheck()
+            {
+                SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
+                         ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+                BackColor = Product.DarkBackground;
+                ForeColor = Product.TextColor;
+                Font = new Font("Segoe UI", 9F);
+                Cursor = Cursors.Hand;
+                TabStop = true;
+            }
+
+            public bool Checked
+            {
+                get { return isChecked; }
+                set
+                {
+                    if (isChecked == value)
+                    {
+                        return;
+                    }
+
+                    isChecked = value;
+                    Invalidate();
+                }
+            }
+
+            protected override void OnClick(EventArgs e)
+            {
+                if (Enabled)
+                {
+                    isChecked = !isChecked;
+                    Invalidate();
+                }
+
+                base.OnClick(e);
+            }
+
+            protected override void OnKeyDown(KeyEventArgs e)
+            {
+                if (Enabled && e.KeyCode == Keys.Space)
+                {
+                    isChecked = !isChecked;
+                    Invalidate();
+                    e.Handled = true;
+                }
+
+                base.OnKeyDown(e);
+            }
+
+            protected override void OnPaint(PaintEventArgs e)
+            {
+                Graphics g = e.Graphics;
+                g.Clear(BackColor);
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+
+                int box = Math.Max(14, Font.Height - 2);
+                int top = (Height - box) / 2;
+                Rectangle boxRect = new Rectangle(1, top, box - 1, box - 1);
+                Color edge = isChecked ? Product.AccentColor : Product.BorderColor;
+
+                using (GraphicsPath path = RoundedRectangle(boxRect, 4))
+                using (SolidBrush fill = new SolidBrush(isChecked ? Product.AccentColor : Product.DarkSurface))
+                using (Pen border = new Pen(edge, 1.4f))
+                {
+                    g.FillPath(fill, path);
+                    g.DrawPath(border, path);
+                }
+
+                if (isChecked)
+                {
+                    float unit = box / 15f;
+                    using (Pen tick = new Pen(Color.White, 1.9f * unit))
+                    {
+                        tick.StartCap = LineCap.Round;
+                        tick.EndCap = LineCap.Round;
+                        tick.LineJoin = LineJoin.Round;
+                        g.DrawLines(tick, new PointF[]
+                        {
+                            new PointF(4.2f * unit, top + 7.6f * unit),
+                            new PointF(6.6f * unit, top + 10.2f * unit),
+                            new PointF(11.2f * unit, top + 4.6f * unit),
+                        });
+                    }
+                }
+
+                Color textColor = Enabled ? ForeColor : Product.MutedColor;
+                int textLeft = box + 9;
+                Size textSize = TextRenderer.MeasureText(Text, Font, Size.Empty, TextFormatFlags.NoPadding);
+                TextRenderer.DrawText(g, Text, Font,
+                    new Point(textLeft, (Height - textSize.Height) / 2),
+                    textColor, TextFormatFlags.NoPadding);
+            }
+
+            private static GraphicsPath RoundedRectangle(Rectangle bounds, int radius)
+            {
+                int diameter = radius * 2;
+                GraphicsPath path = new GraphicsPath();
+                path.AddArc(bounds.X, bounds.Y, diameter, diameter, 180, 90);
+                path.AddArc(bounds.Right - diameter, bounds.Y, diameter, diameter, 270, 90);
+                path.AddArc(bounds.Right - diameter, bounds.Bottom - diameter, diameter, diameter, 0, 90);
+                path.AddArc(bounds.X, bounds.Bottom - diameter, diameter, diameter, 90, 90);
+                path.CloseFigure();
+                return path;
+            }
         }
 
         private static Icon LoadIcon()
